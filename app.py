@@ -43,15 +43,22 @@ def calculate_risk(microdata, true_ids, quasi_columns):
 # ------------------- UI -------------------
 st.write("Upload two CSV files — (1) microdata (dataset to anonymise) and (2) true identifiers (for testing risk).")
 
+# File uploaders
 micro_file = st.file_uploader("Upload Microdata CSV", type="csv")
 true_file = st.file_uploader("Upload True Identifiers CSV (testing only)", type="csv")
 
-# ✅ Safe guard: stop execution if files not uploaded
-if not (micro_file and true_file):
-    st.warning("Please upload both files to continue.")
+# ✅ If files not uploaded, load from sample CSV in repo
+if micro_file is None and os.path.exists("sample_microdata.csv"):
+    micro_file = open("sample_microdata.csv", "rb")
+if true_file is None and os.path.exists("sample_true_ids.csv"):
+    true_file = open("sample_true_ids.csv", "rb")
+
+# ✅ Stop if still no files found
+if micro_file is None or true_file is None:
+    st.error("No data files found. Please upload files or ensure sample CSV exists in the app directory.")
     st.stop()
 
-# ✅ Only runs if both files exist
+# ✅ Read CSVs
 try:
     micro_df = pd.read_csv(micro_file)
     true_df = pd.read_csv(true_file)
@@ -59,6 +66,7 @@ except Exception as e:
     st.error(f"Error reading CSV files: {e}")
     st.stop()
 
+# ------------------- Show Data -------------------
 st.subheader("📊 Data Preview")
 st.write("Microdata sample:")
 st.dataframe(micro_df.head())
@@ -66,8 +74,9 @@ st.dataframe(micro_df.head())
 st.write("True identifiers sample:")
 st.dataframe(true_df.head())
 
+# ------------------- Risk Assessment -------------------
 common_cols = list(set(micro_df.columns).intersection(set(true_df.columns)))
-default_quasi = [c for c in ["age","gender","district"] if c in common_cols]
+default_quasi = [c for c in ["age", "gender", "district"] if c in common_cols]
 if not default_quasi:
     default_quasi = common_cols[:3]
 
@@ -81,6 +90,7 @@ if st.button("Calculate Risk"):
     except Exception as e:
         st.error(f"Error calculating risk: {e}")
 
+# ------------------- Privacy Enhancement -------------------
 st.subheader("🛡 Step 2: Privacy Enhancement")
 numeric_cols = list(micro_df.select_dtypes(include=np.number).columns)
 
