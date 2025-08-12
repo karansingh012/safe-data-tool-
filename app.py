@@ -47,79 +47,78 @@ st.write("Upload two CSV files — (1) microdata (dataset to anonymise) and (2) 
 micro_file = st.file_uploader("Upload Microdata CSV", type="csv")
 true_file = st.file_uploader("Upload True Identifiers CSV (testing only)", type="csv")
 
-# ✅ If files not uploaded, load from sample CSV in repo
+# Load sample CSV files if no upload provided
 if micro_file is None and os.path.exists("sample_microdata.csv"):
-    micro_file = open("sample_microdata.csv", "rb")
+    micro_file = open("sample_microdata.csv", "r")  # text mode
 if true_file is None and os.path.exists("sample_true_ids.csv"):
-    true_file = open("sample_true_ids.csv", "rb")
+    true_file = open("sample_true_ids.csv", "r")  # text mode
 
-# ✅ Stop if still no files found
-if micro_file is None or true_file is None:
+if micro_file is not None and true_file is not None:
+    try:
+        micro_df = pd.read_csv(micro_file)
+        true_df = pd.read_csv(true_file)
+    except Exception as e:
+        st.error(f"Error reading CSV files: {e}")
+        st.stop()
+
+    # ------------------- Show Data -------------------
+    st.subheader("📊 Data Preview")
+    st.write("Microdata sample:")
+    st.dataframe(micro_df.head())
+
+    st.write("True identifiers sample:")
+    st.dataframe(true_df.head())
+
+    # ------------------- Risk Assessment -------------------
+    common_cols = list(set(micro_df.columns).intersection(set(true_df.columns)))
+    default_quasi = [c for c in ["age", "gender", "district"] if c in common_cols]
+    if not default_quasi:
+        default_quasi = common_cols[:3]
+
+    st.subheader("🔍 Step 1: Risk Assessment")
+    quasi_cols = st.multiselect("Select quasi-identifiers", options=common_cols, default=default_quasi)
+
+    if st.button("Calculate Risk"):
+        try:
+            matches, risk = calculate_risk(micro_df, true_df, quasi_cols)
+            st.success(f"Matched Records: {matches} | Risk: {risk:.2f}%")
+        except Exception as e:
+            st.error(f"Error calculating risk: {e}")
+
+    # ------------------- Privacy Enhancement -------------------
+    st.subheader("🛡 Step 2: Privacy Enhancement")
+    numeric_cols = list(micro_df.select_dtypes(include=np.number).columns)
+
+    if not numeric_cols:
+        st.warning("No numeric columns found in microdata.")
+    else:
+        num_col = st.selectbox("Select numeric column to add noise", options=numeric_cols)
+        noise_scale = st.slider("Noise scale (Laplace)", min_value=100, max_value=5000, value=1500, step=100)
+        random_seed = st.number_input("Random seed (optional)", min_value=0, max_value=9999999, value=42, step=1)
+
+        if st.button("Apply Privacy"):
+            try:
+                anon_df = add_laplace_noise(micro_df, num_col, scale=noise_scale, random_state=int(random_seed))
+                if "age" in anon_df.columns:
+                    anon_df = generalise_age(anon_df, "age")
+                st.write("Anonymised Data Sample:")
+                st.dataframe(anon_df.head())
+
+                fig, ax = plt.subplots()
+                ax.hist(micro_df[num_col].dropna(), bins=30, alpha=0.6, label="Original")
+                ax.hist(anon_df[num_col].dropna(), bins=30, alpha=0.6, label="Anonymised")
+                ax.legend()
+                st.pyplot(fig)
+
+                new_quasi = [q for q in quasi_cols if q != "age"]
+                matches_after, risk_after = calculate_risk(anon_df, true_df, new_quasi)
+                st.info(f"After Enhancement → Matched Records: {matches_after} | Risk: {risk_after:.2f}%")
+
+                csv = anon_df.to_csv(index=False).encode("utf-8")
+                st.download_button("Download Anonymised CSV", data=csv, file_name="anonymised_data.csv", mime="text/csv")
+            except Exception as e:
+                st.error(f"Error during privacy enhancement: {e}")
+
+else:
     st.error("No data files found. Please upload files or ensure sample CSV exists in the app directory.")
     st.stop()
-
-# ✅ Read CSVs
-try:
-    micro_df = pd.read_csv(micro_file)
-    true_df = pd.read_csv(true_file)
-except Exception as e:
-    st.error(f"Error reading CSV files: {e}")
-    st.stop()
-
-# ------------------- Show Data -------------------
-st.subheader("📊 Data Preview")
-st.write("Microdata sample:")
-st.dataframe(micro_df.head())
-
-st.write("True identifiers sample:")
-st.dataframe(true_df.head())
-
-# ------------------- Risk Assessment -------------------
-common_cols = list(set(micro_df.columns).intersection(set(true_df.columns)))
-default_quasi = [c for c in ["age", "gender", "district"] if c in common_cols]
-if not default_quasi:
-    default_quasi = common_cols[:3]
-
-st.subheader("🔍 Step 1: Risk Assessment")
-quasi_cols = st.multiselect("Select quasi-identifiers", options=common_cols, default=default_quasi)
-
-if st.button("Calculate Risk"):
-    try:
-        matches, risk = calculate_risk(micro_df, true_df, quasi_cols)
-        st.success(f"Matched Records: {matches} | Risk: {risk:.2f}%")
-    except Exception as e:
-        st.error(f"Error calculating risk: {e}")
-
-# ------------------- Privacy Enhancement -------------------
-st.subheader("🛡 Step 2: Privacy Enhancement")
-numeric_cols = list(micro_df.select_dtypes(include=np.number).columns)
-
-if not numeric_cols:
-    st.warning("No numeric columns found in microdata.")
-else:
-    num_col = st.selectbox("Select numeric column to add noise", options=numeric_cols)
-    noise_scale = st.slider("Noise scale (Laplace)", min_value=100, max_value=5000, value=1500, step=100)
-    random_seed = st.number_input("Random seed (optional)", min_value=0, max_value=9999999, value=42, step=1)
-
-    if st.button("Apply Privacy"):
-        try:
-            anon_df = add_laplace_noise(micro_df, num_col, scale=noise_scale, random_state=int(random_seed))
-            if "age" in anon_df.columns:
-                anon_df = generalise_age(anon_df, "age")
-            st.write("Anonymised Data Sample:")
-            st.dataframe(anon_df.head())
-
-            fig, ax = plt.subplots()
-            ax.hist(micro_df[num_col].dropna(), bins=30, alpha=0.6, label="Original")
-            ax.hist(anon_df[num_col].dropna(), bins=30, alpha=0.6, label="Anonymised")
-            ax.legend()
-            st.pyplot(fig)
-
-            new_quasi = [q for q in quasi_cols if q != "age"]
-            matches_after, risk_after = calculate_risk(anon_df, true_df, new_quasi)
-            st.info(f"After Enhancement → Matched Records: {matches_after} | Risk: {risk_after:.2f}%")
-
-            csv = anon_df.to_csv(index=False).encode("utf-8")
-            st.download_button("Download Anonymised CSV", data=csv, file_name="anonymised_data.csv", mime="text/csv")
-        except Exception as e:
-            st.error(f"Error during privacy enhancement: {e}")
